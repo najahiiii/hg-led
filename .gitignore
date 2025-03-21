@@ -1,0 +1,39 @@
+# Binary files
+*.o
+*.out
+*.elf
+*.bin
+*.hex
+*.map
+*.a
+*.so
+*.exe
+*.dll
+*.dylib
+
+# Compiler & Debug files
+*.d
+*.gcda
+*.gcno
+*.gcov
+*.pdb
+
+# Build directories
+/build/
+/bin/
+/obj/
+/lib/
+
+# Logs & Temp files
+*.log
+*.tmp
+*.swp
+*.swo
+*.swn
+*.bak
+*.pid
+*.seed
+
+# Binary
+hgledon
+trafmon
