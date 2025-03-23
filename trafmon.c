@@ -143,30 +143,30 @@ long get_traffic(const char *iface, const char *direction) {
 }
 
 void monitor_traffic() {
-    long prev_rx = get_traffic(interface_name, "rx");
-    long prev_tx = get_traffic(interface_name, "tx");
+    int max_val = 150; // Safe value
+    lan("on"); // Init lan state on
 
-    // Init lan state on
-    lan("on");
+    long p_rx = get_traffic(interface_name, "rx");
+    long p_tx = get_traffic(interface_name, "tx");
 
     while (running) {
-        long rx = get_traffic(interface_name, "rx");
-        long tx = get_traffic(interface_name, "tx");
-        long rx_rate = (rx - prev_rx) / 1024;
-        long tx_rate = (tx - prev_tx) / 1024;
-        long total_rate = rx_rate + tx_rate;
-        int int_val = get_rate(total_rate);
+        long c_rx = get_traffic(interface_name, "rx");
+        long c_tx = get_traffic(interface_name, "tx");
+        long rx_rate = (c_rx - p_rx) / 1024;
+        long tx_rate = (c_tx - p_tx) / 1024;
+        long final_rate = rx_rate + tx_rate;
+        int int_val = get_rate(final_rate);
 
-        if (int_val > 0 && int_val <= 150) {
+        if (int_val > 0 && int_val <= max_val) {
             lan("dis");
             sleep_ms(int_val);
             lan("on");
         }
 
-        if (!running) break;
+        p_rx = c_rx;
+        p_tx = c_tx;
 
-        prev_rx = rx;
-        prev_tx = tx;
+        if (!running) break;
 
         sleep_ms(150);
     }
