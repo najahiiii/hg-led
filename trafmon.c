@@ -13,6 +13,7 @@
 #include "hgledon.h"
 
 #define LOCK_FILE "/var/run/trafmon.lock"
+#define IFACE_FILE "/var/run/trafmon.iface"
 
 volatile int running = 1;
 char interface_name[32];
@@ -84,10 +85,16 @@ void create_lock_file() {
         fprintf(file, "%d\n", getpid());
         fclose(file);
     }
+    file = fopen(IFACE_FILE, "w");
+    if (file) {
+        fprintf(file, "%s\n", interface_name);
+        fclose(file);
+    }
 }
 
 void remove_lock_file() {
     remove(LOCK_FILE);
+    remove(IFACE_FILE);
 }
 
 int stop_process() {
@@ -127,6 +134,45 @@ int stop_process() {
     }
 
     return EXIT_SUCCESS;
+}
+
+int check_status() {
+    FILE *file = fopen(LOCK_FILE, "r");
+    if (!file) {
+        printf("Traffic monitor is not running.\n");
+        return EXIT_FAILURE;
+    }
+
+    int pid;
+    if (fscanf(file, "%d", &pid) != 1) {
+        fclose(file);
+        printf("Failed to read PID from lock file.\n");
+        return EXIT_FAILURE;
+    }
+    fclose(file);
+
+    file = fopen(IFACE_FILE, "r");
+    if (!file) {
+        printf("Traffic monitor is running (PID: %d), but interface is unknown.\n", pid);
+        return EXIT_SUCCESS;
+    }
+
+    char iface[32];
+    if (fscanf(file, "%31s", iface) != 1) {
+        fclose(file);
+        printf("Traffic monitor is running (PID: %d), but failed to read interface.\n", pid);
+        return EXIT_SUCCESS;
+    }
+    fclose(file);
+
+    if (kill(pid, 0) == 0) {
+        printf("Traffic monitor is running (PID: %d) monitoring interface: %s.\n", pid, iface);
+        return EXIT_SUCCESS;
+    } else {
+        printf("Traffic monitor lock file exists but process not found. Cleaning up.\n");
+        remove_lock_file();
+        return EXIT_FAILURE;
+    }
 }
 
 long get_traffic(const char *iface, const char *direction) {
@@ -215,12 +261,16 @@ void daemonize() {
 
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        printf("Usage: %s <interface|stop>\n", argv[0]);
+        printf("Usage: %s <interface|stop|status>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
         return stop_process();
+    }
+
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        return check_status();
     }
 
     strncpy(interface_name, argv[1], sizeof(interface_name) - 1);
