@@ -119,7 +119,7 @@ int stop_process() {
             if (kill(pid, 0) == -1) {
                 remove(LOCK_FILE);
                 lan("on");
-                printf("Traffic monitor stopped.\n");
+                log_msg("Trafmon stopped.");
                 return EXIT_SUCCESS;
             }
             sleep_ms(500);
@@ -244,6 +244,9 @@ void daemonize() {
     create_lock_file();
     signal(SIGTERM, stop_daemon);
 
+    snprintf(log_buf, sizeof(log_buf), "Starting traffic monitor for interface %s...", interface_name);
+    log_msg(log_buf);
+
     int wait_time = 2;
     int total_wait = 0;
     const int max_wait = 30;
@@ -291,14 +294,9 @@ int main(int argc, char *argv[]) {
     }
 
     printf("Starting traffic monitor for interface %s...\n", interface_name);
+
     daemonize();
-
-    snprintf(log_buf, sizeof(log_buf), "Starting traffic monitor for interface %s...", interface_name);
-    log_msg(log_buf);
     monitor_traffic();
-
-    sprintf(log_buf, "Monitor for interface %s stopped.", interface_name);
-    log_msg(log_buf);
     remove_lock_file();
 
     return EXIT_SUCCESS;
