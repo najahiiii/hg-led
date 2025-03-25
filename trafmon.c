@@ -272,9 +272,24 @@ void daemonize() {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc < 2) {
-        printf("Usage: %s <interface|stop|status>\n", argv[0]);
-        return EXIT_FAILURE;
+    if (argc == 2 && strcmp(argv[1], "help") == 0) {
+        const char *prog = argv[0];
+        printf("\n████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
+        printf("   ██    ██   ██ ██   ██ ██      ████  ████ ██    ██ ████   ██ \n");
+        printf("   ██    ██████  ███████ █████   ██ ████ ██ ██    ██ ██ ██  ██ \n");
+        printf("   ██    ██   ██ ██   ██ ██      ██  ██  ██ ██    ██ ██  ██ ██ \n");
+        printf("   ██    ██   ██ ██   ██ ██      ██      ██  ██████  ██   ████ \n");
+        printf("\nLED Traffic Monitor Daemon\n\n");
+        printf("Usage:\n");
+        printf("  %s start <interface> - Start traffic monitoring on the given interface\n", prog);
+        printf("  %s stop              - Stop the running traffic monitor\n", prog);
+        printf("  %s status            - Check the status of the traffic monitor\n", prog);
+        printf("  %s help              - Show this help message\n", prog);
+        printf("\n");
+        printf("The traffic monitor will blink the LAN LED when traffic is detected.\n");
+        printf("The LED will blink faster for higher traffic rates.\n");
+        printf("\nCopyright (C) 2025 Najahi. All rights reserved.\n");
+        return EXIT_SUCCESS;
     }
 
     if (argc == 2 && strcmp(argv[1], "stop") == 0) {
@@ -285,19 +300,24 @@ int main(int argc, char *argv[]) {
         return check_status();
     }
 
-    strncpy(interface_name, argv[1], sizeof(interface_name) - 1);
-    interface_name[sizeof(interface_name) - 1] = '\0';
+    if (argc == 3 && strcmp(argv[1], "start") == 0) {
+        strncpy(interface_name, argv[2], sizeof(interface_name) - 1);
+        interface_name[sizeof(interface_name) - 1] = '\0';
 
-    if (check_running()) {
-        printf("Traffic monitor already running!\n");
-        return EXIT_FAILURE;
+        if (check_running()) {
+            printf("Traffic monitor already running!\n");
+            return EXIT_FAILURE;
+        }
+
+        printf("Starting traffic monitor for interface %s...\n", interface_name);
+
+        daemonize();
+        monitor_traffic();
+        remove_lock_file();
+
+        return EXIT_SUCCESS;
     }
 
-    printf("Starting traffic monitor for interface %s...\n", interface_name);
-
-    daemonize();
-    monitor_traffic();
-    remove_lock_file();
-
+    printf("Invalid command. Use help for usage instructions.\n");
     return EXIT_SUCCESS;
 }
