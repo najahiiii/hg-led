@@ -219,43 +219,52 @@ void monitor_traffic() {
 }
 
 void daemonize() {
-    pid_t pid = fork();
-    if (pid < 0) exit(EXIT_FAILURE);
-    if (pid > 0) exit(EXIT_SUCCESS);
-
-    umask(0);
-    setsid();
+    if (fork() > 0) exit(EXIT_SUCCESS);
+    if (setsid() < 0) exit(EXIT_FAILURE);
     signal(SIGCHLD, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
+    
+    if (fork() > 0) exit(EXIT_SUCCESS);
 
-    pid = fork();
-    if (pid < 0) exit(EXIT_FAILURE);
-    if (pid > 0) exit(EXIT_SUCCESS);
-
+    umask(0);
     chdir("/");
+
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
 
     int fd = open("/dev/null", O_RDWR);
-    dup2(fd, STDIN_FILENO);
-    dup2(fd, STDOUT_FILENO);
-    dup2(fd, STDERR_FILENO);
+    if (fd >= 0) {
+        dup2(fd, STDIN_FILENO);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+    }
+
+    create_lock_file();
+    signal(SIGTERM, stop_daemon);
 
     int wait_time = 2;
     int total_wait = 0;
     const int max_wait = 30;
+    const int max_total_wait = 240;
 
-    while (!check_iface(interface_name)) {
+    while (!check_iface(interface_name) && total_wait < max_total_wait) {
         snprintf(log_buf, sizeof(log_buf),
-                    "Interface %s not found, waiting %d seconds...", interface_name, wait_time);
+                "Interface %s not found, waiting %d seconds...", interface_name, wait_time);
         log_msg(log_buf);
 
         sleep(wait_time);
         total_wait += wait_time;
-        wait_time += 2;
+        wait_time = (wait_time + 2 > max_wait) ? max_wait : wait_time + 2;
+    }
 
-        if (wait_time > max_wait) wait_time = max_wait;
+    if (total_wait >= max_total_wait) {
+        snprintf(log_buf, sizeof(log_buf),
+                "Timeout waiting for %s, exiting...", interface_name);
+        log_msg(log_buf);
+        remove_lock_file();
+        exit(EXIT_FAILURE);
     }
 }
 
@@ -283,8 +292,6 @@ int main(int argc, char *argv[]) {
 
     printf("Starting traffic monitor for interface %s...\n", interface_name);
     daemonize();
-    create_lock_file();
-    signal(SIGTERM, stop_daemon);
 
     snprintf(log_buf, sizeof(log_buf), "Starting traffic monitor for interface %s...", interface_name);
     log_msg(log_buf);
