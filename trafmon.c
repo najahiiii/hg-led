@@ -30,10 +30,16 @@ void log_msg(const char *msg) {
 }
 
 int get_rate(long rate) {
-    if (rate > 1024) return 50;
-    if (rate > 512)  return 100;
-    if (rate > 256)  return 150;
-    return 0;
+    static const struct { long threshold; int value; } table[] = {
+        { 1024, 50 },
+        { 512,  100 }
+    };
+    
+    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
+        if (rate > table[i].threshold)
+            return table[i].value;
+    }
+    return 150;
 }
 
 int check_iface(const char *iface) {
@@ -189,6 +195,8 @@ long get_traffic(const char *iface, const char *direction) {
 }
 
 void monitor_traffic() {
+    srand(time(NULL));
+
     int max_val = 150; // Safe value
     lan("on"); // Init lan state on
 
@@ -204,9 +212,16 @@ void monitor_traffic() {
         int int_val = get_rate(final_rate);
 
         if (int_val > 0 && int_val <= max_val) {
-            lan("dis");
-            sleep_ms(int_val);
-            lan("on");
+            if (int_val > 100) {
+                int r_sleep = int_val + (rand() % 251);
+                lan("dis");
+                sleep_ms(r_sleep);
+                lan("on");
+            } else {
+                lan("dis");
+                sleep_ms(int_val);
+                lan("on");
+            }
         }
 
         p_rx = c_rx;
@@ -214,7 +229,7 @@ void monitor_traffic() {
 
         if (!running) break;
 
-        sleep_ms(150);
+        sleep_ms(max_val);
     }
 }
 
