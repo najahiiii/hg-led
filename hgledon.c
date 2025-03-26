@@ -111,7 +111,8 @@ void exec(const char *command, const char *action, GPIO_PINS pins) {
     }
 }
 
-void usage(GPIO_PINS pins) {
+void usage(GPIO_PINS pins, const char *kernel_version) {
+    printf("Kernel Version: %s\n", kernel_version);
     printf("Using GPIO Pins:\n  Power: %d, %d\n  LAN: %d, %d\n  IR: %d\n\n",
            pins.power[0], pins.power[1], pins.lan[0], pins.lan[1], pins.ir);
     printf("Usage:\n  hgledon -power [on, off, warn, dis]\n");
@@ -120,9 +121,8 @@ void usage(GPIO_PINS pins) {
     printf("  hgledon -help (to show this message)\n");
 }
 
-GPIO_PINS init_gpio() {
+GPIO_PINS init_gpio(char *kernel_version) {
     int major = 0, minor = 0;
-    char kernel_version[MAX_BUF];
 
     FILE *f = fopen("/proc/sys/kernel/osrelease", "r");
     if (!f) {
@@ -130,7 +130,7 @@ GPIO_PINS init_gpio() {
         exit(1);
     }
 
-    if (!fgets(kernel_version, sizeof(kernel_version), f)) {
+    if (!fgets(kernel_version, MAX_BUF, f)) {
         fclose(f);
         exit(1);
     }

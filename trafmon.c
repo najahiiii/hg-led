@@ -59,10 +59,11 @@ int check_iface(const char *iface) {
 
 void lan(const char *state) {
     static GPIO_PINS pins;
+    static char kernel_version[MAX_BUF];
     static int initialized = 0;
 
     if (!initialized) {
-        pins = init_gpio();
+        pins = init_gpio(kernel_version);
         initialized = 1;
     }
 
