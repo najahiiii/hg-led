@@ -26,6 +26,6 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    exec(argv[1], argv[2], pins);
+    hgl_exec(argv[1], argv[2], pins);
     return 0;
 }

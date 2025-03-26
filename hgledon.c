@@ -97,8 +97,7 @@ void ir_control(const char *ir_action, int pin_ir) {
     }
 }
 
-
-void exec(const char *command, const char *action, GPIO_PINS pins) {
+void hgl_exec(const char *command, const char *action, GPIO_PINS pins) {
     if (strcmp(command, "-power") == 0) {
         lp_control(action, pins.power[0], pins.power[1]);
     } else if (strcmp(command, "-lan") == 0) {

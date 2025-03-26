@@ -67,7 +67,7 @@ void lan(const char *state) {
         initialized = 1;
     }
 
-    exec("-lan", state, pins);
+    hgl_exec("-lan", state, pins);
 }
 
 void sleep_ms(int milliseconds) {
