@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include "hgledon.h"
 
@@ -23,30 +24,37 @@ void export_gpio(int pin) {
     snprintf(path, MAX_BUF, "/sys/class/gpio/gpio%d/value", pin);
     if (access(path, F_OK) == 0) return;
 
-    FILE *f = fopen("/sys/class/gpio/export", "w");
-    if (!f) exit(1);
-    fprintf(f, "%d", pin);
-    fclose(f);
+    int fd = open("/sys/class/gpio/export", O_WRONLY);
+    if (fd < 0) {
+        perror("Failed to export GPIO");
+        exit(1);
+    }
+    dprintf(fd, "%d", pin);
+    close(fd);
 }
 
 void set_gpio_direction(int pin, const char *direction) {
     char path[MAX_BUF];
     snprintf(path, MAX_BUF, "/sys/class/gpio/gpio%d/direction", pin);
-    FILE *f = fopen(path, "w");
-    if (f) {
-        fprintf(f, "%s", direction);
-        fclose(f);
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) {
+        perror("Failed to set GPIO direction");
+        return;
     }
+    dprintf(fd, "%s", direction);
+    close(fd);
 }
 
 void set_gpio_value(int pin, int value) {
     char path[MAX_BUF];
     snprintf(path, MAX_BUF, "/sys/class/gpio/gpio%d/value", pin);
-    FILE *f = fopen(path, "w");
-    if (f) {
-        fprintf(f, "%d", value);
-        fclose(f);
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) {
+        perror("Failed to set GPIO value");
+        return;
     }
+    dprintf(fd, "%d", value);
+    close(fd);
 }
 
 void lp_control(const char *act, int pin_on, int pin_off) {
@@ -61,19 +69,21 @@ void lp_control(const char *act, int pin_on, int pin_off) {
     set_gpio_direction(pin_on, "out");
     set_gpio_direction(pin_off, "out");
 
-    if (strcmp(act, "on") == 0) {
-        set_gpio_value(pin_on, 1);
-        set_gpio_value(pin_off, 0);
-    } else if (strcmp(act, "off") == 0) {
-        set_gpio_value(pin_on, 0);
-        set_gpio_value(pin_off, 1);
-    } else if (strcmp(act, "warn") == 0) {
-        set_gpio_value(pin_on, 1);
-        set_gpio_value(pin_off, 1);
-    } else {
-        set_gpio_value(pin_on, 0);
-        set_gpio_value(pin_off, 0);
-    }
+    int values[4][2] = {
+        {1, 0}, // on
+        {0, 1}, // off
+        {1, 1}, // warn
+        {0, 0}  // dis
+    };
+
+    int index;
+    if (strcmp(act, "on") == 0) index = 0;
+    else if (strcmp(act, "off") == 0) index = 1;
+    else if (strcmp(act, "warn") == 0) index = 2;
+    else index = 3; // "dis"
+
+    set_gpio_value(pin_on, values[index][0]);
+    set_gpio_value(pin_off, values[index][1]);
 }
 
 void ir_control(const char *ir_action, int pin_ir) {
@@ -86,12 +96,9 @@ void ir_control(const char *ir_action, int pin_ir) {
     export_gpio(pin_ir);
     set_gpio_direction(pin_ir, "out");
 
-    if (strcmp(ir_action, "on") == 0) {
-        set_gpio_value(pin_ir, 1);
-    } else if (strcmp(ir_action, "dis") == 0) {
-        set_gpio_value(pin_ir, 0);
-    } else {
-        set_gpio_value(pin_ir, 1);
+    set_gpio_value(pin_ir, strcmp(ir_action, "dis") != 0);
+
+    if (strcmp(ir_action, "reset") == 0) {
         usleep(100000);
         set_gpio_value(pin_ir, 0);
     }
