@@ -57,7 +57,7 @@ int check_iface(const char *iface) {
     return 0;
 }
 
-void lan(const char *state) {
+void led(const char *led_type, const char *state) {
     static GPIO_PINS pins;
     static char kernel_version[MAX_BUF];
     static int initialized = 0;
@@ -67,7 +67,7 @@ void lan(const char *state) {
         initialized = 1;
     }
 
-    hgl_exec("-lan", state, pins);
+    hgl_exec(led_type, state, pins);
 }
 
 void sleep_ms(int milliseconds) {
@@ -125,7 +125,7 @@ int stop_process() {
         for (int i = 0; i < 10; i++) {
             if (kill(pid, 0) == -1) {
                 remove(LOCK_FILE);
-                lan("on");
+                led("-lan", "on");
                 log_msg("Trafmon stopped.");
                 return EXIT_SUCCESS;
             }
@@ -199,7 +199,7 @@ void monitor_traffic() {
     srand(time(NULL));
 
     int max_val = 150; // Safe value
-    lan("on"); // Init lan state on
+    led("-lan", "on"); // Init state LAN on
 
     long p_rx = get_traffic(interface_name, "rx");
     long p_tx = get_traffic(interface_name, "tx");
@@ -215,13 +215,13 @@ void monitor_traffic() {
         if (int_val > 0 && int_val <= max_val) {
             if (int_val > 100) {
                 int r_sleep = int_val + (rand() % 251);
-                lan("dis");
+                led("-lan", "dis");
                 sleep_ms(r_sleep);
-                lan("on");
+                led("-lan", "on");
             } else {
-                lan("dis");
+                led("-lan", "dis");
                 sleep_ms(int_val);
-                lan("on");
+                led("-lan", "on");
             }
         }
 
@@ -302,7 +302,7 @@ int main(int argc, char *argv[]) {
         printf("  %s status            - Check the status of the traffic monitor\n", prog);
         printf("  %s help              - Show this help message\n", prog);
         printf("\n");
-        printf("The traffic monitor will blink the LAN LED when traffic is detected.\n");
+        printf("The traffic monitor will blink the LED when traffic is detected.\n");
         printf("The LED will blink faster for higher traffic rates.\n");
         printf("\nCopyright (C) 2025 Najahi. All rights reserved.\n");
         return EXIT_SUCCESS;
