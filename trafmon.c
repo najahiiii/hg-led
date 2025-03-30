@@ -288,8 +288,8 @@ void daemonize() {
 }
 
 int main(int argc, char *argv[]) {
+    const char *prog = argv[0];
     if (argc == 2 && strcmp(argv[1], "help") == 0) {
-        const char *prog = argv[0];
         printf("\n████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
         printf("   ██    ██   ██ ██   ██ ██      ████  ████ ██    ██ ████   ██ \n");
         printf("   ██    ██████  ███████ █████   ██ ████ ██ ██    ██ ██ ██  ██ \n");
@@ -297,10 +297,10 @@ int main(int argc, char *argv[]) {
         printf("   ██    ██   ██ ██   ██ ██      ██      ██  ██████  ██   ████ \n");
         printf("\nLED Traffic Monitor Daemon\n\n");
         printf("Usage:\n");
-        printf("  %s start <interface> - Start traffic monitoring on the given interface\n", prog);
-        printf("  %s stop              - Stop the running traffic monitor\n", prog);
-        printf("  %s status            - Check the status of the traffic monitor\n", prog);
-        printf("  %s help              - Show this help message\n", prog);
+        printf("  %s start <interface> - Start monitoring traffic on the specified interface.\n", prog);
+        printf("  %s stop              - Stop the traffic monitor.\n", prog);
+        printf("  %s status            - Check if the traffic monitor is running.\n", prog);
+        printf("  %s help              - Show this help message and exit.\n", prog);
         printf("\n");
         printf("The traffic monitor will blink the LED when traffic is detected.\n");
         printf("The LED will blink faster for higher traffic rates.\n");
@@ -334,6 +334,5 @@ int main(int argc, char *argv[]) {
         return EXIT_SUCCESS;
     }
 
-    printf("Invalid command. Use help for usage instructions.\n");
-    return EXIT_SUCCESS;
+    fprintf(stderr, "Invalid arguments. Use '%s help' for usage information.\n", prog);
 }
