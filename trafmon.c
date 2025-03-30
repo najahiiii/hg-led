@@ -14,6 +14,7 @@
 
 #define LOCK_FILE "/var/run/trafmon.lock"
 #define IFACE_FILE "/var/run/trafmon.iface"
+#define DEBUG 0
 
 volatile int running = 1;
 char interface_name[32];
@@ -30,14 +31,14 @@ void log_msg(const char *msg) {
 }
 
 int get_rate(long rate) {
-    static const struct { long threshold; int value; } table[] = {
-        { 1024, 50 },
-        { 512,  100 }
+    static const struct { long threshold; int min_val; int max_val; } table[] = {
+        { 1024, 50, 99 },
+        { 512,  100, 150 }
     };
     
     for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
         if (rate > table[i].threshold)
-            return table[i].value;
+            return table[i].min_val + rand() % (table[i].max_val - table[i].min_val + 1);
     }
     return 150;
 }
@@ -213,16 +214,16 @@ void monitor_traffic() {
         int int_val = get_rate(final_rate);
 
         if (int_val > 0 && int_val <= max_val) {
-            if (int_val > 100) {
-                int r_sleep = int_val + (rand() % 251);
-                led("-lan", "dis");
-                sleep_ms(r_sleep);
-                led("-lan", "on");
-            } else {
-                led("-lan", "dis");
-                sleep_ms(int_val);
-                led("-lan", "on");
+            int r_sleep = (int_val > 100) ? int_val + (rand() % 251) : int_val;
+            if (DEBUG) {
+                snprintf(log_buf, sizeof(log_buf),
+                        "Traffic detected: RX: %ld KB/s, TX: %ld KB/s, Rate: %ld KB/s, Blink rate: %d ms",
+                        rx_rate, tx_rate, final_rate, r_sleep);
+                log_msg(log_buf);
             }
+            led("-lan", "dis");
+            sleep_ms(r_sleep);
+            led("-lan", "on");
         }
 
         p_rx = c_rx;
