@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <syslog.h>
+#include <math.h>
 
 #include <sys/stat.h>
 
@@ -14,11 +15,15 @@
 
 #define LOCK_FILE "/var/run/trafmon.lock"
 #define IFACE_FILE "/var/run/trafmon.iface"
+
+#define TRAFFIC_THRESHOLD 150
+#define MAX_VAL 150
+
 #define DEBUG 0
 
 volatile int running = 1;
 char interface_name[32];
-char log_buf[128];
+char log_buf[256];
 
 void stop_daemon(int) {
     running = 0;
@@ -28,19 +33,6 @@ void log_msg(const char *msg) {
     openlog("trafmon", LOG_PID | LOG_CONS, LOG_DAEMON);
     syslog(LOG_INFO, "%s", msg);
     closelog();
-}
-
-int get_rate(long rate) {
-    static const struct { long threshold; int min_val; int max_val; } table[] = {
-        { 1024, 50, 99 },
-        { 512,  100, 150 }
-    };
-    
-    for (size_t i = 0; i < sizeof(table) / sizeof(table[0]); i++) {
-        if (rate > table[i].threshold)
-            return table[i].min_val + rand() % (table[i].max_val - table[i].min_val + 1);
-    }
-    return 150;
 }
 
 int check_iface(const char *iface) {
@@ -197,41 +189,44 @@ long get_traffic(const char *iface, const char *direction) {
 }
 
 void monitor_traffic() {
-    srand(time(NULL));
-
-    int max_val = 150; // Safe value
-    led("-lan", "on"); // Init state LAN on
-
     long p_rx = get_traffic(interface_name, "rx");
     long p_tx = get_traffic(interface_name, "tx");
 
-    while (running) {
-        long c_rx = get_traffic(interface_name, "rx");
-        long c_tx = get_traffic(interface_name, "tx");
-        long rx_rate = (c_rx - p_rx) / 1024;
-        long tx_rate = (c_tx - p_tx) / 1024;
-        long final_rate = rx_rate + tx_rate;
-        int int_val = get_rate(final_rate);
+    led("-lan", "on");
 
-        if (int_val > 0 && int_val <= max_val) {
-            int r_sleep = (int_val > 100) ? int_val + (rand() % 251) : int_val;
-            if (DEBUG) {
-                snprintf(log_buf, sizeof(log_buf),
-                        "Traffic detected: RX: %ld KB/s, TX: %ld KB/s, Rate: %ld KB/s, Blink rate: %d ms",
-                        rx_rate, tx_rate, final_rate, r_sleep);
-                log_msg(log_buf);
-            }
-            led("-lan", "dis");
-            sleep_ms(r_sleep);
-            led("-lan", "on");
+    long last_final_rate = -1;
+
+    while (running) {
+        long c_rx_tx[2];
+        c_rx_tx[0] = get_traffic(interface_name, "rx");
+        c_rx_tx[1] = get_traffic(interface_name, "tx");
+
+        long rx_rate = (c_rx_tx[0] - p_rx) / 1024;
+        long tx_rate = (c_rx_tx[1] - p_tx) / 1024;
+        long final_rate = rx_rate + tx_rate;
+
+        int s_rate = MAX_VAL - log10(final_rate + 1) * 10;
+
+        if (DEBUG) {
+            snprintf(log_buf, sizeof(log_buf),
+            "Traffic detected: RX: %ld KB/s, TX: %ld KB/s, Rate: %ld KB/s, Blink rate: %d ms",
+            rx_rate, tx_rate, final_rate, s_rate);
+            log_msg(log_buf);
         }
 
-        p_rx = c_rx;
-        p_tx = c_tx;
+        if (labs(final_rate - last_final_rate) > TRAFFIC_THRESHOLD) {
+            led("-lan", "dis");
+            sleep_ms(s_rate);
+            led("-lan", "on");
+            last_final_rate = final_rate;
+        }
+
+        p_rx = c_rx_tx[0];
+        p_tx = c_rx_tx[1];
 
         if (!running) break;
 
-        sleep_ms(max_val);
+        sleep_ms(MAX_VAL);
     }
 }
 
