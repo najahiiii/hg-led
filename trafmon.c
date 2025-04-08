@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
@@ -10,20 +11,32 @@
 #include <math.h>
 
 #include <sys/stat.h>
+#include <sys/time.h>
 
 #include "hgledon.h"
 
 #define LOCK_FILE "/var/run/trafmon.lock"
 #define IFACE_FILE "/var/run/trafmon.iface"
 
+#define IDLE_TIMEOUT 5000
 #define TRAFFIC_THRESHOLD 150
-#define MAX_VAL 150
+#define MIN_BLINK_DELAY 50
+#define MAX_BLINK_DELAY 150
+#define MAX_VAL 100
+#define KB 1024
 
 #define DEBUG 0
 
 volatile int running = 1;
 char interface_name[32];
 char log_buf[256];
+
+typedef enum {
+    DIS_ON,
+    DIS_OFF,
+    ON_OFF,
+    OFF_ON
+} Pattern;
 
 void stop_daemon(int) {
     running = 0;
@@ -119,6 +132,8 @@ int stop_process() {
             if (kill(pid, 0) == -1) {
                 remove(LOCK_FILE);
                 led("-lan", "on");
+                sleep_ms(100);
+                led("-power", "on");
                 log_msg("Trafmon stopped.");
                 return EXIT_SUCCESS;
             }
@@ -188,41 +203,96 @@ long get_traffic(const char *iface, const char *direction) {
     return bytes;
 }
 
+void blink_led(const char *led_name, Pattern pattern, int first_ms, int second_ms, int repeat) {
+    for (int i = 0; i < repeat; i++) {
+        switch (pattern) {
+            case DIS_ON:
+                led(led_name, "dis");
+                sleep_ms(first_ms);
+                led(led_name, "on");
+                sleep_ms(second_ms);
+                break;
+            case DIS_OFF:
+                led(led_name, "dis");
+                sleep_ms(first_ms);
+                led(led_name, "off");
+                sleep_ms(second_ms);
+                break;
+            case ON_OFF:
+                led(led_name, "on");
+                sleep_ms(first_ms);
+                led(led_name, "off");
+                sleep_ms(second_ms);
+                break;
+            case OFF_ON:
+                led(led_name, "off");
+                sleep_ms(first_ms);
+                led(led_name, "on");
+                sleep_ms(second_ms);
+                break;
+            default:
+                break;
+        }
+    }
+}
+
+int clamp(int val, int min, int max) {
+    if (val < min) return min;
+    if (val > max) return max;
+    return val;
+}
+
+bool trx_hi(long rate) {
+    return rate > TRAFFIC_THRESHOLD;
+}
+
+long current_time_ms() {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return tv.tv_sec * 1000L + tv.tv_usec / 1000L;
+}
+
 void monitor_traffic() {
-    long p_rx = get_traffic(interface_name, "rx");
-    long p_tx = get_traffic(interface_name, "tx");
+    long prev_rx = get_traffic(interface_name, "rx");
+    long prev_tx = get_traffic(interface_name, "tx");
 
-    led("-lan", "on");
-
-    long last_final_rate = -1;
+    long last_activity_time = current_time_ms();
 
     while (running) {
-        long c_rx_tx[2];
-        c_rx_tx[0] = get_traffic(interface_name, "rx");
-        c_rx_tx[1] = get_traffic(interface_name, "tx");
+        long curr_rx = get_traffic(interface_name, "rx");
+        long curr_tx = get_traffic(interface_name, "tx");
 
-        long rx_rate = (c_rx_tx[0] - p_rx) / 1024;
-        long tx_rate = (c_rx_tx[1] - p_tx) / 1024;
+        long rx_rate = (curr_rx - prev_rx) / KB;
+        long tx_rate = (curr_tx - prev_tx) / KB;
         long final_rate = rx_rate + tx_rate;
 
-        int s_rate = MAX_VAL - log10(final_rate + 1) * 10;
+        int rate = clamp(MAX_VAL - log10(final_rate + 1) * 10, 50, MAX_VAL);
+        long now = current_time_ms();
 
         if (DEBUG) {
             snprintf(log_buf, sizeof(log_buf),
-            "Traffic detected: RX: %ld KB/s, TX: %ld KB/s, Rate: %ld KB/s, Blink rate: %d ms",
-            rx_rate, tx_rate, final_rate, s_rate);
+                "Traffic: RX: %ld KB/s, TX: %ld KB/s, Total: %ld KB/s, Blink delay: %d ms",
+                rx_rate, tx_rate, final_rate, rate);
             log_msg(log_buf);
         }
 
-        if (labs(final_rate - last_final_rate) > TRAFFIC_THRESHOLD) {
-            led("-lan", "dis");
-            sleep_ms(s_rate);
-            led("-lan", "on");
-            last_final_rate = final_rate;
+        if (trx_hi(final_rate)) {
+            blink_led("-lan", DIS_ON, rate, rate, 1);
+            last_activity_time = now;
+        } else {
+            if (now - last_activity_time > IDLE_TIMEOUT) {
+                blink_led("-lan", DIS_ON, rate, rate, 1);
+                blink_led("-power", DIS_ON, rate, rate, 1);
+                blink_led("-lan", OFF_ON, rate, rate, 1);
+                blink_led("-power", OFF_ON, rate, rate, 1);
+            } else {
+                blink_led("-power", DIS_ON, 0, 100, 1);
+                blink_led("-power", OFF_ON, 100, 0, 1);
+            }
         }
 
-        p_rx = c_rx_tx[0];
-        p_tx = c_rx_tx[1];
+        prev_rx = curr_rx;
+        prev_tx = curr_tx;
 
         if (!running) break;
 
