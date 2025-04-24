@@ -110,6 +110,61 @@ void remove_lock_file() {
     remove(IFACE_FILE);
 }
 
+void redirect_stdio_to_null() {
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    int fd = open("/dev/null", O_RDWR);
+    if (fd >= 0) {
+        dup2(fd, STDIN_FILENO);
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+    }
+}
+
+void setup_signals() {
+    signal(SIGCHLD, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGTERM, stop_daemon);
+}
+
+void wait_for_interface(const char *iface) {
+    int wait_time = 2;
+    int total_wait = 0;
+    const int max_wait = 30;
+    const int max_total_wait = 240;
+
+    while (!check_iface(iface) && total_wait < max_total_wait) {
+        snprintf(log_buf, sizeof(log_buf),
+                "Interface %s not found, waiting %d seconds...", iface, wait_time);
+        log_msg(log_buf);
+
+        sleep(wait_time);
+        total_wait += wait_time;
+        wait_time = (wait_time + 2 > max_wait) ? max_wait : wait_time + 2;
+    }
+
+    if (total_wait >= max_total_wait) {
+        snprintf(log_buf, sizeof(log_buf),
+                "Timeout waiting for %s, exiting...", iface);
+        log_msg(log_buf);
+        remove_lock_file();
+        exit(EXIT_FAILURE);
+    }
+
+    if (total_wait > 0) {
+        snprintf(log_buf, sizeof(log_buf),
+                "Interface %s found after waiting %d seconds.", iface, total_wait);
+        log_msg(log_buf);
+    } else {
+        snprintf(log_buf, sizeof(log_buf),
+                "Interface %s found.", iface);
+        log_msg(log_buf);
+    }
+}
+
 int stop_process() {
     FILE *file = fopen(LOCK_FILE, "r");
     if (!file) {
@@ -303,54 +358,24 @@ void monitor_traffic() {
 void daemonize() {
     if (fork() > 0) exit(EXIT_SUCCESS);
     if (setsid() < 0) exit(EXIT_FAILURE);
-    signal(SIGCHLD, SIG_IGN);
-    signal(SIGHUP, SIG_IGN);
     
+    setup_signals();
+
     if (fork() > 0) exit(EXIT_SUCCESS);
 
     umask(0);
     chdir("/");
 
-    close(STDIN_FILENO);
-    close(STDOUT_FILENO);
-    close(STDERR_FILENO);
-
-    int fd = open("/dev/null", O_RDWR);
-    if (fd >= 0) {
-        dup2(fd, STDIN_FILENO);
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
-        close(fd);
-    }
-
+    redirect_stdio_to_null();
     create_lock_file();
-    signal(SIGTERM, stop_daemon);
 
-    snprintf(log_buf, sizeof(log_buf), "Starting traffic monitor for interface %s...", interface_name);
+    log_msg("Daemon started.");
+
+    wait_for_interface(interface_name);
+
+    snprintf(log_buf, sizeof(log_buf),
+            "Starting traffic monitor for interface %s...", interface_name);
     log_msg(log_buf);
-
-    int wait_time = 2;
-    int total_wait = 0;
-    const int max_wait = 30;
-    const int max_total_wait = 240;
-
-    while (!check_iface(interface_name) && total_wait < max_total_wait) {
-        snprintf(log_buf, sizeof(log_buf),
-                "Interface %s not found, waiting %d seconds...", interface_name, wait_time);
-        log_msg(log_buf);
-
-        sleep(wait_time);
-        total_wait += wait_time;
-        wait_time = (wait_time + 2 > max_wait) ? max_wait : wait_time + 2;
-    }
-
-    if (total_wait >= max_total_wait) {
-        snprintf(log_buf, sizeof(log_buf),
-                "Timeout waiting for %s, exiting...", interface_name);
-        log_msg(log_buf);
-        remove_lock_file();
-        exit(EXIT_FAILURE);
-    }
 }
 
 int main(int argc, char *argv[]) {
