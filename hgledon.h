@@ -1,8 +1,6 @@
 #ifndef HGLEDON_H
 #define HGLEDON_H
 
-#define MAX_BUF 64
-
 typedef struct {
     int power[2];
     int lan[2];

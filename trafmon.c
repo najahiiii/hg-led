@@ -23,9 +23,8 @@
 #define MIN_BLINK_DELAY 50
 #define MAX_BLINK_DELAY 150
 #define MAX_VAL 100
+#define MAX_BUF 64
 #define KB 1024
-
-#define DEBUG 0
 
 volatile int running = 1;
 char interface_name[32];
@@ -327,16 +326,16 @@ void monitor_traffic() {
         long tx_rate = (curr_tx - prev_tx) / KB;
         long final_rate = rx_rate + tx_rate;
 
-        int rate = clamp(MAX_VAL - log10(final_rate + 1) * 10, 50, MAX_VAL);
+        int rate = clamp(MAX_VAL - log10(final_rate) * 15, MIN_BLINK_DELAY, MAX_BLINK_DELAY);
         long now = current_time_ms();
         int iface_status = check_iface(interface_name);
 
-        if (DEBUG) {
-            snprintf(log_buf, sizeof(log_buf),
-                "Traffic: RX: %ld KB/s, TX: %ld KB/s, Total: %ld KB/s, Blink delay: %d ms",
-                rx_rate, tx_rate, final_rate, rate);
-            log_msg(log_buf);
-        }
+        #ifdef DEBUG
+        snprintf(log_buf, sizeof(log_buf),
+            "Traffic: RX: %ld KB/s, TX: %ld KB/s, Total: %ld KB/s, Blink delay: %d ms",
+            rx_rate, tx_rate, final_rate, rate);
+        log_msg(log_buf);
+        #endif // DEBUG
 
         if (!iface_status) {
             blink_led("-lan", DIS_OFF, 100, 100, 1);
@@ -363,7 +362,7 @@ void monitor_traffic() {
 void daemonize() {
     if (fork() > 0) exit(EXIT_SUCCESS);
     if (setsid() < 0) exit(EXIT_FAILURE);
-    
+
     setup_signals();
 
     if (fork() > 0) exit(EXIT_SUCCESS);
