@@ -53,14 +53,29 @@ int check_iface(const char *iface) {
     if (!dir) return 0;
 
     struct dirent *entry;
+    int found = 0;
+
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, iface) == 0) {
-            closedir(dir);
-            return 1;
+            found = 1;
+            break;
         }
     }
     closedir(dir);
-    return 0;
+
+    if (!found) return 0;
+
+    char path[128];
+    snprintf(path, sizeof(path), "/sys/class/net/%s/carrier", iface);
+
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+
+    int carrier = 0;
+    fscanf(f, "%d", &carrier);
+    fclose(f);
+
+    return carrier == 1;
 }
 
 void led(const char *led_type, const char *state) {
@@ -131,27 +146,18 @@ void setup_signals() {
 }
 
 void wait_for_interface(const char *iface) {
-    int wait_time = 2;
+    int wait_time = 10;
     int total_wait = 0;
     const int max_wait = 30;
-    const int max_total_wait = 240;
 
-    while (!check_iface(iface) && total_wait < max_total_wait) {
+    while (!check_iface(iface)) {
         snprintf(log_buf, sizeof(log_buf),
                 "Interface %s not found, waiting %d seconds...", iface, wait_time);
         log_msg(log_buf);
 
         sleep(wait_time);
         total_wait += wait_time;
-        wait_time = (wait_time + 2 > max_wait) ? max_wait : wait_time + 2;
-    }
-
-    if (total_wait >= max_total_wait) {
-        snprintf(log_buf, sizeof(log_buf),
-                "Timeout waiting for %s, exiting...", iface);
-        log_msg(log_buf);
-        remove_lock_file();
-        exit(EXIT_FAILURE);
+        wait_time = (wait_time + 10 > max_wait) ? max_wait : wait_time + 10;
     }
 
     if (total_wait > 0) {
