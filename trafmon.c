@@ -329,6 +329,7 @@ void monitor_traffic() {
 
         int rate = clamp(MAX_VAL - log10(final_rate + 1) * 10, 50, MAX_VAL);
         long now = current_time_ms();
+        int iface_status = check_iface(interface_name);
 
         if (DEBUG) {
             snprintf(log_buf, sizeof(log_buf),
@@ -337,18 +338,16 @@ void monitor_traffic() {
             log_msg(log_buf);
         }
 
-        if (trx_hi(final_rate)) {
+        if (!iface_status) {
+            blink_led("-lan", DIS_OFF, 100, 100, 1);
+        } else if (trx_hi(final_rate)) {
             blink_led("-lan", DIS_ON, rate, rate, 1);
             last_activity_time = now;
         } else {
             if (now - last_activity_time > IDLE_TIMEOUT) {
-                blink_led("-lan", DIS_ON, rate, rate, 1);
-                blink_led("-power", DIS_ON, rate, rate, 1);
-                blink_led("-lan", OFF_ON, rate, rate, 1);
-                blink_led("-power", OFF_ON, rate, rate, 1);
+                led("-lan", "on");
             } else {
-                blink_led("-power", DIS_ON, 0, 100, 1);
-                blink_led("-power", OFF_ON, 100, 0, 1);
+                blink_led("-lan", OFF_ON, 100, 100, 1);
             }
         }
 
