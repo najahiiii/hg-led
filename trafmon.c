@@ -18,8 +18,8 @@
 #define LOCK_FILE "/var/run/trafmon.lock"
 #define IFACE_FILE "/var/run/trafmon.iface"
 
-#define IDLE_TIMEOUT 5000
-#define TRAFFIC_THRESHOLD 150
+#define IDLE_TIMEOUT 1000
+#define TRAFFIC_THRESHOLD 10
 #define MIN_BLINK_DELAY 50
 #define MAX_BLINK_DELAY 150
 #define MAX_VAL 100
