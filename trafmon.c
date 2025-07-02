@@ -15,9 +15,6 @@
 
 #include "hgledon.h"
 
-#define LOCK_FILE "/var/run/trafmon.lock"
-#define IFACE_FILE "/var/run/trafmon.iface"
-
 #define IDLE_TIMEOUT 1000
 #define TRAFFIC_THRESHOLD 10
 #define MIN_BLINK_DELAY 50
@@ -29,6 +26,9 @@
 volatile int running = 1;
 char interface_name[32];
 char log_buf[256];
+char lock_file_path[64];
+char iface_file_path[64];
+char led_name[16] = "lan";
 
 typedef enum {
     DIS_ON,
@@ -36,6 +36,61 @@ typedef enum {
     ON_OFF,
     OFF_ON
 } Pattern;
+
+void set_file_paths(const char *iface) {
+    snprintf(lock_file_path, sizeof(lock_file_path), "/var/run/trafmon_%s.lock", iface);
+    snprintf(iface_file_path, sizeof(iface_file_path), "/var/run/trafmon_%s.iface", iface);
+}
+
+bool parse_iface(const char *filename, char *iface, size_t size) {
+    const char *prefix = "trafmon_";
+    const char *suffix = ".lock";
+
+    size_t len = strlen(filename);
+    size_t prefix_len = strlen(prefix);
+    size_t suffix_len = strlen(suffix);
+
+    if (len <= prefix_len + suffix_len) return false;
+    if (strncmp(filename, prefix, prefix_len) != 0) return false;
+    if (strcmp(filename + len - suffix_len, suffix) != 0) return false;
+
+    size_t iface_len = len - prefix_len - suffix_len;
+    if (iface_len >= size) return false;
+
+    memcpy(iface, filename + prefix_len, iface_len);
+    iface[iface_len] = '\0';
+    return true;
+}
+
+int list_instances() {
+    DIR *d = opendir("/var/run");
+    if (!d) {
+        perror("Failed to open /var/run");
+        return EXIT_FAILURE;
+    }
+
+    struct dirent *entry;
+    int found = 0;
+
+    while ((entry = readdir(d)) != NULL) {
+        char iface[32];
+        if (parse_iface(entry->d_name, iface, sizeof(iface))) {
+            if (!found) {
+                printf("Running trafmon instances:\n");
+                found = 1;
+            }
+            printf(" - %s\n", iface);
+        }
+    }
+    closedir(d);
+
+    if (!found) {
+        printf("No running trafmon instances found.\n");
+        return EXIT_FAILURE;
+    }
+
+    return EXIT_SUCCESS;
+}
 
 void stop_daemon(int) {
     running = 0;
@@ -98,30 +153,35 @@ void sleep_ms(int milliseconds) {
 }
 
 int check_running() {
-    FILE *file = fopen(LOCK_FILE, "r");
-    if (file) {
+    FILE *file = fopen(lock_file_path, "r");
+    if (!file) return 0;
+
+    int pid;
+    if (fscanf(file, "%d", &pid) != 1) {
         fclose(file);
-        return 1;
+        return 0;
     }
-    return 0;
+    fclose(file);
+
+    return kill(pid, 0) == 0;
 }
 
 void create_lock_file() {
-    FILE *file = fopen(LOCK_FILE, "w");
+    FILE *file = fopen(lock_file_path, "w");
     if (file) {
         fprintf(file, "%d\n", getpid());
         fclose(file);
     }
-    file = fopen(IFACE_FILE, "w");
+    file = fopen(iface_file_path, "w");
     if (file) {
-        fprintf(file, "%s\n", interface_name);
+        fprintf(file, "%s %s\n", interface_name, led_name);
         fclose(file);
     }
 }
 
 void remove_lock_file() {
-    remove(LOCK_FILE);
-    remove(IFACE_FILE);
+    remove(lock_file_path);
+    remove(iface_file_path);
 }
 
 void redirect_stdio_to_null() {
@@ -142,6 +202,44 @@ void setup_signals() {
     signal(SIGCHLD, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
     signal(SIGTERM, stop_daemon);
+}
+
+void select_led_for_instance() {
+    int lan_in_use = 0;
+    int power_in_use = 0;
+
+    DIR *d = opendir("/var/run");
+    struct dirent *entry;
+
+    if (d) {
+        while ((entry = readdir(d)) != NULL) {
+            char iface[32];
+            if (parse_iface(entry->d_name, iface, sizeof(iface))) {
+                char led_path[64];
+                snprintf(led_path, sizeof(led_path), "/var/run/trafmon_%s.iface", iface);
+
+                FILE *f = fopen(led_path, "r");
+                if (f) {
+                    char iface[32], used_led[16];
+                    if (fscanf(f, "%31s %15s", iface, used_led) == 2) {
+                        if (strcmp(used_led, "lan") == 0) lan_in_use = 1;
+                        if (strcmp(used_led, "power") == 0) power_in_use = 1;
+                    }
+                    fclose(f);
+                }
+            }
+        }
+        closedir(d);
+    }
+
+    if (!lan_in_use) {
+        strncpy(led_name, "lan", sizeof(led_name));
+    } else if (!power_in_use) {
+        strncpy(led_name, "power", sizeof(led_name));
+    } else {
+        fprintf(stderr, "Maximum 2 trafmon instances supported (lan, power).\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 void wait_for_interface(const char *iface) {
@@ -170,30 +268,31 @@ void wait_for_interface(const char *iface) {
     }
 }
 
-int stop_process() {
-    FILE *file = fopen(LOCK_FILE, "r");
+int stop_process(const char *iface) {
+    set_file_paths(iface);
+
+    FILE *file = fopen(lock_file_path, "r");
     if (!file) {
-        printf("Traffic monitor is not running.\n");
+        printf("Traffic monitor for %s is not running.\n", iface);
         return EXIT_FAILURE;
     }
 
     int pid;
     if (fscanf(file, "%d", &pid) != 1) {
         fclose(file);
-        printf("Failed to read PID from lock file.\n");
+        printf("Failed to read PID from lock file for %s.\n", iface);
         return EXIT_FAILURE;
     }
     fclose(file);
 
     if (kill(pid, SIGTERM) == 0) {
-        printf("Stopping traffic monitor (PID: %d)...\n", pid);
+        printf("Stopping traffic monitor for %s (PID: %d)...\n", iface, pid);
 
         for (int i = 0; i < 10; i++) {
             if (kill(pid, 0) == -1) {
-                remove(LOCK_FILE);
-                led("-lan", "on");
+                remove_lock_file();
                 sleep_ms(100);
-                led("-power", "on");
+                led(led_name, "on");
                 log_msg("Trafmon stopped.");
                 return EXIT_SUCCESS;
             }
@@ -201,54 +300,62 @@ int stop_process() {
         }
 
         kill(pid, SIGKILL);
-        remove(LOCK_FILE);
+        remove_lock_file();
     } else {
-        printf("Failed to send SIGTERM, process may not exist.\n");
-        remove(LOCK_FILE);
+        printf("Failed to send SIGTERM to %d, process may not exist.\n", pid);
+        remove_lock_file();
         return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
 }
 
-int check_status() {
-    FILE *file = fopen(LOCK_FILE, "r");
+int check_status(const char *iface) {
+    set_file_paths(iface);
+
+    FILE *file = fopen(lock_file_path, "r");
     if (!file) {
-        printf("Traffic monitor is not running.\n");
+        printf("Traffic monitor for %s is not running.\n", iface);
         return EXIT_FAILURE;
     }
 
     int pid;
     if (fscanf(file, "%d", &pid) != 1) {
         fclose(file);
-        printf("Failed to read PID from lock file.\n");
+        printf("Failed to read PID from lock file for %s.\n", iface);
         return EXIT_FAILURE;
     }
     fclose(file);
 
-    file = fopen(IFACE_FILE, "r");
+    file = fopen(iface_file_path, "r");
     if (!file) {
-        printf("Traffic monitor is running (PID: %d), but interface is unknown.\n", pid);
+        printf("Traffic monitor is running (PID: %d), but LED/interface is unknown.\n", pid);
         return EXIT_SUCCESS;
     }
 
-    char iface[32];
-    if (fscanf(file, "%31s", iface) != 1) {
-        fclose(file);
-        printf("Traffic monitor is running (PID: %d), but failed to read interface.\n", pid);
-        return EXIT_SUCCESS;
-    }
+    char real_iface[32] = {0};
+    char led_used[16] = {0};
+
+    int n = fscanf(file, "%31s %15s", real_iface, led_used);
     fclose(file);
 
-    if (kill(pid, 0) == 0) {
-        printf("Traffic monitor is running (PID: %d) monitoring interface: %s.\n", pid, iface);
-        return EXIT_SUCCESS;
-    } else {
-        printf("Traffic monitor lock file exists but process not found. Cleaning up.\n");
-        remove_lock_file();
-        return EXIT_FAILURE;
+    if (n == 2) {
+        if (kill(pid, 0) == 0) {
+            printf("Traffic monitor is running (PID: %d), interface: %s, LED: %s\n", pid, real_iface, led_used);
+            return EXIT_SUCCESS;
+        }
+    } else if (n == 1) {
+        if (kill(pid, 0) == 0) {
+            printf("Traffic monitor is running (PID: %d), interface: %s, LED: unknown\n", pid, real_iface);
+            return EXIT_SUCCESS;
+        }
     }
+
+    printf("Lock file exists for %s but process not found. Cleaning up.\n", iface);
+    remove_lock_file();
+    return EXIT_FAILURE;
 }
+
 
 long get_traffic(const char *iface, const char *direction) {
     char path[128];
@@ -326,7 +433,7 @@ void monitor_traffic() {
         long tx_rate = (curr_tx - prev_tx) / KB;
         long final_rate = rx_rate + tx_rate;
 
-        int rate = clamp(MAX_VAL - log10(final_rate) * 15, MIN_BLINK_DELAY, MAX_BLINK_DELAY);
+        int rate = clamp(MAX_VAL - log10(final_rate) * 10, MIN_BLINK_DELAY, MAX_BLINK_DELAY);
         long now = current_time_ms();
         int iface_status = check_iface(interface_name);
 
@@ -338,15 +445,15 @@ void monitor_traffic() {
         #endif // DEBUG
 
         if (!iface_status) {
-            blink_led("-lan", DIS_OFF, 100, 100, 1);
+            blink_led(led_name, DIS_OFF, 100, 100, 1);
         } else if (trx_hi(final_rate)) {
-            blink_led("-lan", DIS_ON, rate, rate, 1);
+            blink_led(led_name, DIS_ON, rate, rate, 1);
             last_activity_time = now;
         } else {
             if (now - last_activity_time > IDLE_TIMEOUT) {
-                led("-lan", "on");
+                led(led_name, "on");
             } else {
-                blink_led("-lan", OFF_ON, 100, 100, 1);
+                blink_led(led_name, OFF_ON, 100, 100, 1);
             }
         }
 
@@ -385,42 +492,129 @@ void daemonize() {
 int main(int argc, char *argv[]) {
     const char *prog = argv[0];
     if (argc == 2 && strcmp(argv[1], "help") == 0) {
-        printf("\n████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
+        printf("\n");
+        printf("████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
         printf("   ██    ██   ██ ██   ██ ██      ████  ████ ██    ██ ████   ██ \n");
         printf("   ██    ██████  ███████ █████   ██ ████ ██ ██    ██ ██ ██  ██ \n");
         printf("   ██    ██   ██ ██   ██ ██      ██  ██  ██ ██    ██ ██  ██ ██ \n");
         printf("   ██    ██   ██ ██   ██ ██      ██      ██  ██████  ██   ████ \n");
-        printf("\nLED Traffic Monitor Daemon\n\n");
-        printf("Usage:\n");
-        printf("  %s start <interface> - Start monitoring traffic on the specified interface.\n", prog);
-        printf("  %s stop              - Stop the traffic monitor.\n", prog);
-        printf("  %s status            - Check if the traffic monitor is running.\n", prog);
-        printf("  %s help              - Show this help message and exit.\n", prog);
         printf("\n");
+        printf("LED Traffic Monitor Daemon\n\n");
+        printf("Usage:\n");
+        printf("  %s start <interface>   - Start monitoring traffic on the specified interface.\n", prog);
+        printf("  %s stop <interface>    - Stop monitoring the specified interface.\n", prog);
+        printf("  %s stop                - Stop all running traffic monitor instances.\n", prog);
+        printf("  %s status              - Show status of all running instances.\n", prog);
+        printf("  %s list                - List all running trafmon instances.\n", prog);
+        printf("  %s help                - Show this help message and exit.\n\n", prog);
         printf("The traffic monitor will blink the LED when traffic is detected.\n");
-        printf("The LED will blink faster for higher traffic rates.\n");
-        printf("\nCopyright (C) 2025 Najahi. All rights reserved.\n");
+        printf("The LED will blink faster for higher traffic rates.\n\n");
+        printf("Copyright (C) 2025 Najahi. All rights reserved.\n");
         return EXIT_SUCCESS;
     }
 
-    if (argc == 2 && strcmp(argv[1], "stop") == 0) {
-        return stop_process();
+    if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
+        if (argc == 3) {
+            strncpy(interface_name, argv[2], sizeof(interface_name) - 1);
+            interface_name[sizeof(interface_name) - 1] = '\0';
+            return stop_process(interface_name);
+        }
+
+        if (argc == 2) {
+            printf("Stopping all running trafmon instances...\n");
+
+            DIR *d = opendir("/var/run");
+            if (!d) {
+                perror("Failed to open /var/run");
+                return EXIT_FAILURE;
+            }
+
+            struct dirent *entry;
+            int found = 0;
+
+            while ((entry = readdir(d)) != NULL) {
+                char iface[32];
+                if (parse_iface(entry->d_name, iface, sizeof(iface))) {
+                    found = 1;
+                    printf(" → Stopping instance on interface: %s\n", iface);
+                    stop_process(iface);
+                }
+            }
+            closedir(d);
+
+            if (!found) {
+                printf("No running trafmon instances found.\n");
+                return EXIT_FAILURE;
+            }
+
+            return EXIT_SUCCESS;
+        }
+
+        fprintf(stderr, "Invalid usage. Use: %s stop [<interface>] or stop for stop all instances\n", prog);
+        return EXIT_FAILURE;
     }
 
-    if (argc == 2 && strcmp(argv[1], "status") == 0) {
-        return check_status();
+    if (argc >= 2 && strcmp(argv[1], "status") == 0) {
+        if (argc == 3) {
+            strncpy(interface_name, argv[2], sizeof(interface_name) - 1);
+            interface_name[sizeof(interface_name) - 1] = '\0';
+            return check_status(interface_name);
+        }
+
+        if (argc == 2) {
+            int found = 0;
+            DIR *d = opendir("/var/run");
+            if (!d) {
+                perror("Failed to open /var/run");
+                return EXIT_FAILURE;
+            }
+
+            struct dirent *entry;
+            while ((entry = readdir(d)) != NULL) {
+                char iface[32];
+                if (parse_iface(entry->d_name, iface, sizeof(iface))) {
+                    strncpy(interface_name, iface, sizeof(interface_name) - 1);
+                    interface_name[sizeof(interface_name) - 1] = '\0';
+                    check_status(interface_name);
+                    found = 1;
+                }
+            }
+            closedir(d);
+
+            if (!found) {
+                printf("No running trafmon instances found.\n");
+                return EXIT_FAILURE;
+            }
+
+            return EXIT_SUCCESS;
+        }
+
+        fprintf(stderr, "Invalid usage. Use: %s status [<interface>]\n", prog);
+        return EXIT_FAILURE;
+    }
+
+    if (argc == 2 && strcmp(argv[1], "list") == 0) {
+        return list_instances();
     }
 
     if (argc == 3 && strcmp(argv[1], "start") == 0) {
         strncpy(interface_name, argv[2], sizeof(interface_name) - 1);
         interface_name[sizeof(interface_name) - 1] = '\0';
 
+        set_file_paths(interface_name);
+
+        select_led_for_instance();
+
         if (check_running()) {
             printf("Traffic monitor already running!\n");
             return EXIT_FAILURE;
         }
 
-        printf("Starting traffic monitor for interface %s...\n", interface_name);
+        snprintf(log_buf, sizeof(log_buf),
+                "Starting traffic monitor for interface %s with led %s...\n", interface_name, led_name);
+        log_msg(log_buf);
+
+        printf("Starting traffic monitor for interface %s with led %s...\n", interface_name, led_name);
 
         daemonize();
         monitor_traffic();

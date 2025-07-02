@@ -107,11 +107,11 @@ void ir_control(const char *ir_action, int pin_ir) {
 }
 
 void hgl_exec(const char *command, const char *action, GPIO_PINS pins) {
-    if (strcmp(command, "-power") == 0) {
+    if (strcmp(command, "power") == 0) {
         lp_control(action, pins.power[0], pins.power[1]);
-    } else if (strcmp(command, "-lan") == 0) {
+    } else if (strcmp(command, "lan") == 0) {
         lp_control(action, pins.lan[0], pins.lan[1]);
-    } else if (strcmp(command, "-ir") == 0) {
+    } else if (strcmp(command, "ir") == 0) {
         ir_control(action, pins.ir);
     } else {
         fprintf(stderr, "Error: Invalid command '%s'\n", command);
@@ -123,10 +123,10 @@ void usage(GPIO_PINS pins, const char *kernel_version) {
     printf("Kernel Version: %s\n", kernel_version);
     printf("Using GPIO Pins:\n  Power: %d, %d\n  LAN: %d, %d\n  IR: %d\n\n",
            pins.power[0], pins.power[1], pins.lan[0], pins.lan[1], pins.ir);
-    printf("Usage:\n  hgledon -power [on, off, warn, dis]\n");
-    printf("  hgledon -lan [on, off, warn, dis]\n");
-    printf("  hgledon -ir [on, dis, reset]\n");
-    printf("  hgledon -help (to show this message)\n");
+    printf("Usage:\n  hgledon power [on, off, warn, dis]\n");
+    printf("  hgledon lan [on, off, warn, dis]\n");
+    printf("  hgledon ir [on, dis, reset]\n");
+    printf("  hgledon help (to show this message)\n");
 }
 
 GPIO_PINS init_gpio(char *kernel_version) {
@@ -163,14 +163,14 @@ int main(int argc, char *argv[]) {
 
     GPIO_PINS pins = init_gpio(kernel_version);
 
-    if (argc == 2 && strcmp(argv[1], "-help") == 0) {
+    if (argc == 2 && strcmp(argv[1], "help") == 0) {
         usage(pins, kernel_version);
         return 0;
     }
 
     if (argc != 3) {
         fprintf(stderr, "Error: Incorrect number of arguments\n");
-        fprintf(stderr, "Use -help for more info\n");
+        fprintf(stderr, "Use help for more info\n");
         return 1;
     }
 
