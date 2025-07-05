@@ -37,6 +37,15 @@ typedef enum {
     OFF_ON
 } Pattern;
 
+typedef enum {
+    LED_STATE_UNKNOWN,
+    LED_STATE_OFF,
+    LED_STATE_ON,
+    LED_STATE_BLINK
+} led_state_t;
+
+static led_state_t last_led_state = LED_STATE_UNKNOWN;
+
 void set_file_paths(const char *iface) {
     snprintf(lock_file_path, sizeof(lock_file_path), "/var/run/trafmon_%s.lock", iface);
     snprintf(iface_file_path, sizeof(iface_file_path), "/var/run/trafmon_%s.iface", iface);
@@ -60,6 +69,41 @@ bool parse_iface(const char *filename, char *iface, size_t size) {
     memcpy(iface, filename + prefix_len, iface_len);
     iface[iface_len] = '\0';
     return true;
+}
+
+int is_valid_led(const char *led) {
+    return strcmp(led, "lan") == 0 || strcmp(led, "power") == 0;
+}
+
+int is_led_in_use(const char *target_led) {
+    DIR *d = opendir("/var/run");
+    struct dirent *entry;
+
+    if (!d) return 0;
+
+    while ((entry = readdir(d)) != NULL) {
+        char iface[32];
+        if (parse_iface(entry->d_name, iface, sizeof(iface))) {
+            char led_path[64];
+            snprintf(led_path, sizeof(led_path), "/var/run/trafmon_%s.iface", iface);
+
+            FILE *f = fopen(led_path, "r");
+            if (f) {
+                char read_iface[32], used_led[16];
+                if (fscanf(f, "%31s %15s", read_iface, used_led) == 2) {
+                    if (strcmp(used_led, target_led) == 0) {
+                        fclose(f);
+                        closedir(d);
+                        return 1;
+                    }
+                }
+                fclose(f);
+            }
+        }
+    }
+
+    closedir(d);
+    return 0;
 }
 
 int list_instances() {
@@ -425,17 +469,57 @@ void monitor_traffic() {
 
     long last_activity_time = current_time_ms();
 
+    static int lb_rate = -1;
+    static int lb_pattern = -1;
+
     while (running) {
         long curr_rx = get_traffic(interface_name, "rx");
         long curr_tx = get_traffic(interface_name, "tx");
 
-        long rx_rate = (curr_rx - prev_rx) / KB;
-        long tx_rate = (curr_tx - prev_tx) / KB;
+        long rx_diff = curr_rx >= prev_rx ? curr_rx - prev_rx : 0;
+        long tx_diff = curr_tx >= prev_tx ? curr_tx - prev_tx : 0;
+        long rx_rate = rx_diff / KB;
+        long tx_rate = tx_diff / KB;
         long final_rate = rx_rate + tx_rate;
 
-        int rate = clamp(MAX_VAL - log10(final_rate) * 10, MIN_BLINK_DELAY, MAX_BLINK_DELAY);
+        long safe_rate = final_rate;
+        if (safe_rate <= 0) {
+            safe_rate = 1;
+        }
+        int rate = clamp(MAX_VAL - (int)(log10(safe_rate + 1) * 10), MIN_BLINK_DELAY, MAX_BLINK_DELAY);
         long now = current_time_ms();
         int iface_status = check_iface(interface_name);
+
+        if (!iface_status) {
+            if (last_led_state != LED_STATE_OFF) {
+                blink_led(led_name, DIS_OFF, 100, 100, 1);
+                last_led_state = LED_STATE_OFF;
+            }
+        } else if (trx_hi(final_rate)) {
+            if (last_led_state != LED_STATE_BLINK || lb_pattern != DIS_ON || lb_rate != rate) {
+                blink_led(led_name, DIS_ON, rate, rate, 1);
+                last_led_state = LED_STATE_BLINK;
+                lb_pattern = DIS_ON;
+                lb_rate = rate;
+            }
+            last_activity_time = now;
+        } else {
+            if (now - last_activity_time > IDLE_TIMEOUT) {
+                if (last_led_state != LED_STATE_ON) {
+                    led(led_name, "on");
+                    last_led_state = LED_STATE_ON;
+                }
+            } else {
+                if (last_led_state != LED_STATE_BLINK || lb_pattern != OFF_ON) {
+                    blink_led(led_name, OFF_ON, 100, 100, 1);
+                    last_led_state = LED_STATE_BLINK;
+                    lb_pattern = OFF_ON;
+                }
+            }
+        }
+
+        prev_rx = curr_rx;
+        prev_tx = curr_tx;
 
         #ifdef DEBUG
         snprintf(log_buf, sizeof(log_buf),
@@ -443,22 +527,6 @@ void monitor_traffic() {
             rx_rate, tx_rate, final_rate, rate);
         log_msg(log_buf);
         #endif // DEBUG
-
-        if (!iface_status) {
-            blink_led(led_name, DIS_OFF, 100, 100, 1);
-        } else if (trx_hi(final_rate)) {
-            blink_led(led_name, DIS_ON, rate, rate, 1);
-            last_activity_time = now;
-        } else {
-            if (now - last_activity_time > IDLE_TIMEOUT) {
-                led(led_name, "on");
-            } else {
-                blink_led(led_name, OFF_ON, 100, 100, 1);
-            }
-        }
-
-        prev_rx = curr_rx;
-        prev_tx = curr_tx;
 
         if (!running) break;
 
@@ -489,27 +557,34 @@ void daemonize() {
     log_msg(log_buf);
 }
 
+void show_help(const char *prog) {
+    printf("\n");
+    printf("████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
+    printf("   ██    ██   ██ ██   ██ ██      ████  ████ ██    ██ ████   ██ \n");
+    printf("   ██    ██████  ███████ █████   ██ ████ ██ ██    ██ ██ ██  ██ \n");
+    printf("   ██    ██   ██ ██   ██ ██      ██  ██  ██ ██    ██ ██  ██ ██ \n");
+    printf("   ██    ██   ██ ██   ██ ██      ██      ██  ██████  ██   ████ \n");
+    printf("\nLED Traffic Monitor Daemon\n\nUsage:\n");
+    printf("  %s start <interface> [led]  - Start monitoring traffic on interface (led: lan|power)\n", prog);
+    printf("  %s stop [<interface>]       - Stop specific or all trafmon instances\n", prog);
+    printf("  %s status [<interface>]     - Show status of specific or all instances\n", prog);
+    printf("  %s list                     - List running instances\n", prog);
+    printf("  %s help                     - Show this help message\n", prog);
+    printf("\nCopyright (C) 2025 Najahi.\n");
+}
+
 int main(int argc, char *argv[]) {
     const char *prog = argv[0];
-    if (argc == 2 && strcmp(argv[1], "help") == 0) {
-        printf("\n");
-        printf("████████ ██████   █████  ███████ ███    ███  ██████  ███    ██ \n");
-        printf("   ██    ██   ██ ██   ██ ██      ████  ████ ██    ██ ████   ██ \n");
-        printf("   ██    ██████  ███████ █████   ██ ████ ██ ██    ██ ██ ██  ██ \n");
-        printf("   ██    ██   ██ ██   ██ ██      ██  ██  ██ ██    ██ ██  ██ ██ \n");
-        printf("   ██    ██   ██ ██   ██ ██      ██      ██  ██████  ██   ████ \n");
-        printf("\n");
-        printf("LED Traffic Monitor Daemon\n\n");
-        printf("Usage:\n");
-        printf("  %s start <interface>   - Start monitoring traffic on the specified interface.\n", prog);
-        printf("  %s stop <interface>    - Stop monitoring the specified interface.\n", prog);
-        printf("  %s stop                - Stop all running traffic monitor instances.\n", prog);
-        printf("  %s status              - Show status of all running instances.\n", prog);
-        printf("  %s list                - List all running trafmon instances.\n", prog);
-        printf("  %s help                - Show this help message and exit.\n\n", prog);
-        printf("The traffic monitor will blink the LED when traffic is detected.\n");
-        printf("The LED will blink faster for higher traffic rates.\n\n");
-        printf("Copyright (C) 2025 Najahi. All rights reserved.\n");
+
+    if (argc < 2) {
+        fprintf(stderr, "Missing arguments. Use '%s help' for usage.\n", prog);
+        return EXIT_FAILURE;
+    }
+
+    const char *cmd = argv[1];
+
+    if (strcmp(cmd, "help") == 0) {
+        show_help(prog);
         return EXIT_SUCCESS;
     }
 
@@ -597,13 +672,29 @@ int main(int argc, char *argv[]) {
         return list_instances();
     }
 
-    if (argc == 3 && strcmp(argv[1], "start") == 0) {
+    if (strcmp(argv[1], "start") == 0 && (argc == 3 || argc == 4)) {
         strncpy(interface_name, argv[2], sizeof(interface_name) - 1);
         interface_name[sizeof(interface_name) - 1] = '\0';
 
         set_file_paths(interface_name);
 
-        select_led_for_instance();
+        if (argc == 4) {
+            const char *user_led = argv[3];
+            if (!is_valid_led(user_led)) {
+                fprintf(stderr, "Invalid LED name '%s'. Only 'lan' or 'power' allowed.\n", user_led);
+                return EXIT_FAILURE;
+            }
+
+            if (is_led_in_use(user_led)) {
+                fprintf(stderr, "LED '%s' is already in use.\n", user_led);
+                return EXIT_FAILURE;
+            }
+
+            strncpy(led_name, user_led, sizeof(led_name) - 1);
+            led_name[sizeof(led_name) - 1] = '\0';
+        } else {
+            select_led_for_instance();
+        }
 
         if (check_running()) {
             printf("Traffic monitor already running!\n");
@@ -623,5 +714,6 @@ int main(int argc, char *argv[]) {
         return EXIT_SUCCESS;
     }
 
-    fprintf(stderr, "Invalid arguments. Use '%s help' for usage information.\n", prog);
+    fprintf(stderr, "Invalid usage. Use '%s help' for usage information.\n", prog);
+    return EXIT_FAILURE;
 }
