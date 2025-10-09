@@ -7,52 +7,68 @@ on:
 
 jobs:
   build:
-    name: ${{ matrix.arch }}-${{ matrix.branch }} build
+    name: ${{ matrix.name }} build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        arch:
-          - aarch64_generic
-        branch:
-          - openwrt-23.05
-          - openwrt-24.10
-          - SNAPSHOT
+        include:
+          - name: "23.05.5"
+            sdk: "aarch64_generic-23.05.5"
+            archdir: "aarch64_generic"
+          - name: "24.10.2"
+            sdk: "aarch64_generic-24.10.2"
+            archdir: "aarch64_generic"
+          - name: "main"
+            sdk: "aarch64_generic"
+            archdir: "aarch64_generic"
 
     steps:
-      - name: checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: build
         uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
+          ARCH: ${{ matrix.sdk }}
           FEEDNAME: local
           PACKAGES: "hgledon trafmon"
           NO_REFRESH_CHECK: true
 
       - name: List built files
+        run: ls -al bin/packages/${{ matrix.archdir }}/local || true
+
+      - name: Prepare release files
+        if: github.ref_type == 'tag'
         run: |
-          echo "Listing outputs for ${{ matrix.arch }}-${{ matrix.branch }}:"
-          ls -al bin/packages/${{ matrix.arch }}/local || true
+          set -euo pipefail
+          mkdir -p dist
+          SAFE_TAG="${GITHUB_REF_NAME//\//_}"   # aman jika tag mengandung '/'
+          SAFE_NAME="${{ matrix.name }}"
+          shopt -s nullglob
+          for f in bin/packages/${{ matrix.archdir }}/local/*.{ipk,apk}; do
+            ext="${f##*.}"
+            base="$(basename "$f" .${ext})"
+            cp "$f" "dist/${base}-${SAFE_NAME}-${SAFE_TAG}.${ext}"
+          done
+          ls -al dist || true
 
       - name: Upload artifacts
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: local_${{ matrix.arch }}-${{ matrix.branch }}
+          name: local_${{ matrix.name }}
           path: |
-            bin/packages/${{ matrix.arch }}/local/*.ipk
+            bin/packages/${{ matrix.archdir }}/local/*.ipk
+            bin/packages/${{ matrix.archdir }}/local/*.apk
           compression-level: 0
 
-      - name: Upload release
+      - name: Upload releases
         if: github.ref_type == 'tag'
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           tag: ${{ github.ref_name }}
-          file: |
-            bin/packages/${{ matrix.arch }}/local/*.ipk
+          file: dist/*
           file_glob: true
           overwrite: true
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
