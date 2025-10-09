@@ -1,0 +1,11 @@
+# Default base config
+
+config instance 'lan'
+	option enabled '0'
+	option ifname 'br-lan'
+	option led 'lan'
+
+config instance 'wan'
+	option enabled '0'
+	option ifname 'wan'
+	option led 'power'

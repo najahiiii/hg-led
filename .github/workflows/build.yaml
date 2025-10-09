@@ -1,0 +1,58 @@
+name: build-packages
+
+on:
+  push:
+    tags: ["v*", "release-*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}-${{ matrix.branch }} build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64_generic
+        branch:
+          - openwrt-23.05
+          - openwrt-24.10
+          - SNAPSHOT
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: build
+        uses: openwrt/gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}-${{ matrix.branch }}
+          FEEDNAME: local
+          PACKAGES: "hgledon trafmon"
+          NO_REFRESH_CHECK: true
+
+      - name: List built files
+        run: |
+          echo "Listing outputs for ${{ matrix.arch }}-${{ matrix.branch }}:"
+          ls -al bin/packages/${{ matrix.arch }}/local || true
+
+      - name: Upload artifacts
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: local_${{ matrix.arch }}-${{ matrix.branch }}
+          path: |
+            bin/packages/${{ matrix.arch }}/local/*.ipk
+          compression-level: 0
+
+      - name: Upload release
+        if: github.ref_type == 'tag'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref_name }}
+          file: |
+            bin/packages/${{ matrix.arch }}/local/*.ipk
+          file_glob: true
+          overwrite: true
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}

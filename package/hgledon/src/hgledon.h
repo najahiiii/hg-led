@@ -1,7 +1,8 @@
 #ifndef HGLEDON_H
 #define HGLEDON_H
 
-typedef struct {
+typedef struct
+{
     int power[2];
     int lan[2];
     int ir;
