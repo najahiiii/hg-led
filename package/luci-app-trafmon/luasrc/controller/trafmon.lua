@@ -9,5 +9,5 @@ function index()
 		firstchild(), _("TrafMon"), 60).dependent = false
 
 	entry({"admin", "services", "trafmon", "config"},
-		template("trafmon/config"), _("Configuration"), 1).leaf = true
+		view("trafmon/config"), _("Configuration"), 1).leaf = true
 end
