@@ -2,8 +2,11 @@ name: build-packages
 
 on:
   push:
+    branches: ["**"]
     tags: ["v*", "release-*"]
-  workflow_dispatch:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
 
 jobs:
   build:
@@ -37,12 +40,27 @@ jobs:
       - name: List built files
         run: ls -al bin/packages/${{ matrix.archdir }}/local || true
 
+      - name: Prepare CI files
+        if: github.ref_type != 'tag'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          SAFE_NAME="${{ matrix.name }}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          shopt -s nullglob
+          for f in bin/packages/${{ matrix.archdir }}/local/*.{ipk,apk}; do
+            ext="${f##*.}"
+            base="$(basename "$f" .${ext})"
+            cp "$f" "dist/${base}-${SAFE_NAME}-${SHORT_SHA}.${ext}"
+          done
+          ls -al dist || true
+
       - name: Prepare release files
         if: github.ref_type == 'tag'
         run: |
           set -euo pipefail
           mkdir -p dist
-          SAFE_TAG="${GITHUB_REF_NAME//\//_}"   # aman jika tag mengandung '/'
+          SAFE_TAG="${GITHUB_REF_NAME//\//_}"
           SAFE_NAME="${{ matrix.name }}"
           shopt -s nullglob
           for f in bin/packages/${{ matrix.archdir }}/local/*.{ipk,apk}; do
@@ -56,10 +74,8 @@ jobs:
         if: github.ref_type != 'tag'
         uses: actions/upload-artifact@v4
         with:
-          name: local_${{ matrix.name }}
-          path: |
-            bin/packages/${{ matrix.archdir }}/local/*.ipk
-            bin/packages/${{ matrix.archdir }}/local/*.apk
+          name: local_${{ matrix.name }}_${{ github.sha }}
+          path: dist/*
           compression-level: 0
 
       - name: Upload releases
