@@ -1,7 +1,7 @@
 include $(TOPDIR)/rules.mk
 
 LUCI_TITLE:=LuCI App for TrafMon (LED Traffic Monitor)
-LUCI_DEPENDS:=+luci-compat +luci-base +rpcd +rpcd-mod-uci +rpcd-mod-file +rpcd-mod-iwinfo
+LUCI_DEPENDS:=+luci-base +luci-compat +rpcd +rpcd-mod-file +rpcd-mod-luci +rpcd-mod-iwinfo +trafmon +hgledon
 LUCI_PKGARCH:=all
 PKG_LICENSE:=MIT
 PKG_MAINTAINER:=Najahi
