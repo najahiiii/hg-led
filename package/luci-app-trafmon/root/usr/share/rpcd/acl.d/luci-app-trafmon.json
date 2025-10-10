@@ -1,0 +1,16 @@
+{
+  "luci-app-trafmon": {
+    "description": "Grant LuCI TrafMon access",
+    "read": {
+      "uci": ["trafmon"],
+      "file": {
+        "/var/run": ["list"],
+        "/var/run/*": ["read"]
+      }
+    },
+    "write": {
+      "uci": ["trafmon"],
+      "luci": ["setInitAction"]
+    }
+  }
+}

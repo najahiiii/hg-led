@@ -31,7 +31,7 @@ jobs:
         env:
           ARCH: ${{ matrix.sdk }}
           FEEDNAME: local
-          PACKAGES: "hgledon trafmon"
+          PACKAGES: "hgledon trafmon luci-app-trafmon"
           NO_REFRESH_CHECK: true
 
       - name: List built files
